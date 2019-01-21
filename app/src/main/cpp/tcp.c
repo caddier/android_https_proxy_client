@@ -224,21 +224,18 @@ void check_tcp_socket(const struct arguments *args,
     // Check socket error
     if (ev->events & EPOLLERR) {
         s->tcp.time = time(NULL);
-
         int serr = 0;
         socklen_t optlen = sizeof(int);
         int err = getsockopt(s->socket, SOL_SOCKET, SO_ERROR, &serr, &optlen);
-        if (err < 0)
+        if (err < 0) {
             log_android(ANDROID_LOG_ERROR, "%s getsockopt error %d: %s",
                         session, errno, strerror(errno));
-        else if (serr)
+        } else if (serr) {
             log_android(ANDROID_LOG_ERROR, "%s SO_ERROR %d: %s",
                         session, serr, strerror(serr));
-
+        }
         write_rst(args, &s->tcp);
-
         // Connection refused
-
         if (err >= 0 && (serr == ECONNREFUSED || serr == EHOSTUNREACH)) {
             struct icmp icmp;
             memset(&icmp, 0, sizeof(struct icmp));
@@ -260,7 +257,6 @@ void check_tcp_socket(const struct arguments *args,
                 memcpy(&sicmp.saddr.ip6, &s->tcp.saddr.ip6, 16);
                 memcpy(&sicmp.daddr.ip6, &s->tcp.daddr.ip6, 16);
             }
-
             write_icmp(args, &sicmp, &icmp, 8);
         }
     } else {
@@ -283,15 +279,16 @@ void check_tcp_socket(const struct arguments *args,
                             char tmp_buffer[512] = {0};
                             int32_t offset = 0;
                             int32_t recved = 512;
+                            uint32_t left_space = 512;
                             while(strstr(tmp_buffer, "\r\n\r\n") == NULL ) {
                                 tunnel_recv(s->tunnel, &tmp_buffer[offset], &recved);
                                 offset += recved;
+                                left_space -= recved;
+                                recved = left_space;
                             }
-
                             s->tcp.connect_sent = TCP_CONNECT_ESTABLISHED;
                             log_android(ANDROID_LOG_INFO, "RECV HTTP RESPONSE11 %s", buffer);
                             tunnel_set_httpstate_established(s->tunnel);
-
                         } else {
                             log_android(ANDROID_LOG_ERROR, "peer disconnected, so disconnect local tcp connection");
                             write_rst(args, &s->tcp);
@@ -327,12 +324,6 @@ void check_tcp_socket(const struct arguments *args,
                     size_t len = s->tcp.forward->len - s->tcp.forward->sent;
 
                     ssize_t sent = tunnel_send(s->tunnel, data, len);
-//                  ssize_t sent = send(s->socket,
-//                                        data,
-//                                        newlen,
-//                                        (unsigned int) (MSG_NOSIGNAL | (s->tcp.forward->psh
-//                                                                        ? 0
-//                                                                        : MSG_MORE)));
                     if (sent > len) {
                         sent = len;
                     }
@@ -410,7 +401,6 @@ void check_tcp_socket(const struct arguments *args,
                     uint32_t buffer_size = (send_window > s->tcp.mss
                                             ? s->tcp.mss : send_window);
                     uint8_t *buffer = malloc(buffer_size);
-//                    ssize_t bytes = recv(s->socket, buffer, (size_t) buffer_size, 0);
                     ssize_t bytes = tunnel_recv(s->tunnel, buffer, &buffer_size);
                     if (bytes < 0) {
                         // Socket error
@@ -454,9 +444,12 @@ void check_tcp_socket(const struct arguments *args,
                                 char tmp_buffer[512] = {0};
                                 int32_t offset = 0;
                                 int32_t recved = 512;
+                                uint32_t left_space = 512;
                                 while(strstr(tmp_buffer, "\r\n\r\n") == NULL ) {
                                     tunnel_recv(s->tunnel, &tmp_buffer[offset], &recved);
+                                    left_space -= recved;
                                     offset += recved;
+                                    recved = left_space;
                                 }
                                 s->tcp.connect_sent = TCP_CONNECT_ESTABLISHED;
                                 log_android(ANDROID_LOG_INFO, "RECV HTTP RESPONSE %s", buffer);
@@ -621,7 +614,7 @@ jboolean handle_tcp(const struct arguments *args,
     }
 
     // Check session
-    if (cur == NULL) {
+    if (cur == NULL) { //new session
         log_android(ANDROID_LOG_DEBUG, " tcp session not exists");
         //new tcp session, it is a handshake packet
         if (tcphdr->syn) {
@@ -638,11 +631,11 @@ jboolean handle_tcp(const struct arguments *args,
                 if (kind == 0) // End of options list
                     break;
 
-                if (kind == 2 && len == 4)
+                if (kind == 2 && len == 4) {
                     mss = ntohs(*((uint16_t *) (options + 2)));
-
-                else if (kind == 3 && len == 3)
+                } else if (kind == 3 && len == 3) {
                     ws = *(options + 2);
+                }
 
                 if (kind == 1) {
                     optlen--;
@@ -659,7 +652,6 @@ jboolean handle_tcp(const struct arguments *args,
             // Register session
             struct ng_session *s = malloc(sizeof(struct ng_session));
             s->protocol = IPPROTO_TCP;
-
             s->tcp.time = time(NULL);
             s->tcp.uid = uid;
             s->tcp.version = version;
@@ -676,10 +668,6 @@ jboolean handle_tcp(const struct arguments *args,
             s->tcp.sent = 0;
             s->tcp.received = 0;
             s->tcp.connect_sent = TCP_CONNECT_NOT_SENT;
-//            if (rport == 80) {
-//                s->tcp.connect_sent = TCP_CONNECT_ESTABLISHED;
-//            }
-
             if (version == 4) {
                 s->tcp.saddr.ip4 = (__be32) ip4->saddr;
                 s->tcp.daddr.ip4 = (__be32) ip4->daddr;
@@ -697,13 +685,12 @@ jboolean handle_tcp(const struct arguments *args,
             s->tunnel = NULL;
 
             if (datalen) {
-                log_android(ANDROID_LOG_WARN, "%s SYN data", packet);
+                log_android(ANDROID_LOG_WARN, "%s SYN with data", packet);
                 s->tcp.forward = malloc(sizeof(struct segment));
                 s->tcp.forward->seq = s->tcp.remote_seq;
                 s->tcp.forward->len = datalen;
                 s->tcp.forward->sent = 0;
                 s->tcp.forward->psh = tcphdr->psh;
-
                 s->tcp.forward->data = malloc(datalen);
                 memcpy(s->tcp.forward->data, data, datalen);
                 s->tcp.forward->next = NULL;
@@ -720,16 +707,13 @@ jboolean handle_tcp(const struct arguments *args,
                 goto free;
             }
 
-
             if (s->socket < 0) {
                 // Remote might retry
                 log_android(ANDROID_LOG_ERROR, "remote socket can not connnect %s:%d", redirect.raddr, redirect.rport);
                 free(s);
                 goto free;
             }
-
             s->tcp.recv_window = get_receive_window(s);
-
             log_android(ANDROID_LOG_DEBUG, "TCP socket %d lport %d",
                         s->socket, get_local_port(s->socket));
 
@@ -737,14 +721,15 @@ jboolean handle_tcp(const struct arguments *args,
             memset(&s->ev, 0, sizeof(struct epoll_event));
             s->ev.events = EPOLLOUT | EPOLLERR;
             s->ev.data.ptr = s;
-            if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, s->socket, &s->ev))
-                log_android(ANDROID_LOG_ERROR, "epoll add tcp error %d: %s",
+            if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, s->socket, &s->ev)) {
+                 log_android(ANDROID_LOG_ERROR, "epoll add tcp error %d: %s",
                             errno, strerror(errno));
+            }
 
             s->next = ng_session;
             ng_session = s;
-
         } else {
+        //not exists session.  but not handshake packet. so reset this connection
             log_android(ANDROID_LOG_ERROR, "%s unknown session , reset it", packet);
 
             struct tcp_session rst;
@@ -765,7 +750,6 @@ jboolean handle_tcp(const struct arguments *args,
             rst.dest = tcphdr->dest;
 
             write_rst(args, &rst);
-
             goto free;
         }
     } else {
@@ -802,11 +786,6 @@ jboolean handle_tcp(const struct arguments *args,
 
             if (cur->tcp.connect_sent == TCP_CONNECT_NOT_SENT) {
                 if (len > 0) {
-                    //uint8_t buffer[512];
-                    //sprintf(buffer, "CONNECT %s:443 HTTP/1.0\r\n\r\n", cur->tcp.hostname);
-                    //here, we need to send Connect host request by tls tunnel
-                    //ssize_t sent = send(cur->socket, buffer, strlen(buffer), MSG_NOSIGNAL);
-
                     if(cur->tunnel == NULL && isllegaldomain(remote_host_domain)) {
                         cur->tunnel = wrap_tcp_socket(cur->socket, cur->tcp.hostdomain, rport);
                         if (open_tunnel(cur->tunnel) < 0) {
@@ -818,7 +797,6 @@ jboolean handle_tcp(const struct arguments *args,
                             goto free;
                         }
                         cur->tcp.connect_sent = TCP_CONNECT_SENT;
-
                      } else if(!isllegaldomain(remote_host_domain)) {
                         log_android(ANDROID_LOG_ERROR, "illegal domain , reset this connection %s", remote_host_domain);
                         write_rst(args, &cur->tcp);
@@ -841,7 +819,7 @@ jboolean handle_tcp(const struct arguments *args,
                     cur->tcp.acked - cur->tcp.local_start);
             //queue the tcp data to tcp session
             queue_tcp(args, tcphdr, session, &cur->tcp, data, datalen);
-            log_android(ANDROID_LOG_WARN, "remote is not established");
+            log_android(ANDROID_LOG_WARN, "remote is not established, but data is coming from local"); //why
             goto free;
         }
 
@@ -1136,81 +1114,7 @@ int open_tcp_socket(const struct arguments *args,
 
 
 
-int open_tls_tunnel(const struct arguments *args,
-                    const struct tcp_session *cur, const struct allowed *redirect,
-                            char *remote_domain, uint16_t remote_port, int tcp_socket ) {
-    int sock;
-    int version;
 
-    int rport = htons(cur->dest);
-    if (rport != 80 && rport != 443) {
-        redirect = NULL;
-    }
-
-    if (redirect == NULL) {
-        version = cur->version;
-    } else
-        version = (strstr(redirect->raddr, ":") == NULL ? 4 : 6);
-
-    // Get TCP socket
-    if ((sock = socket(version == 4 ? PF_INET : PF_INET6, SOCK_STREAM, 0)) < 0) {
-        log_android(ANDROID_LOG_ERROR, "socket error %d: %s", errno, strerror(errno));
-        return -1;
-    }
-
-    // Protect
-    if (protect_socket(args, sock) < 0)
-        return -1;
-
-    // Set non blocking
-    int flags = fcntl(sock, F_GETFL, 0);
-    if (flags < 0 || fcntl(sock, F_SETFL, flags | O_NONBLOCK) < 0) {
-        log_android(ANDROID_LOG_ERROR, "fcntl socket O_NONBLOCK error %d: %s",
-                    errno, strerror(errno));
-        return -1;
-    }
-
-    // Build target address
-    struct sockaddr_in addr4;
-    struct sockaddr_in6 addr6;
-    if (redirect == NULL) {
-        if (version == 4) {
-            addr4.sin_family = AF_INET;
-            addr4.sin_addr.s_addr = (__be32) cur->daddr.ip4;
-            addr4.sin_port = cur->dest;
-        } else {
-            addr6.sin6_family = AF_INET6;
-            memcpy(&addr6.sin6_addr, &cur->daddr.ip6, 16);
-            addr6.sin6_port = cur->dest;
-        }
-    } else {
-        log_android(ANDROID_LOG_WARN, "TCP%d redirect to %s/%u",
-                    version, redirect->raddr, redirect->rport);
-
-        if (version == 4) {
-            addr4.sin_family = AF_INET;
-            inet_pton(AF_INET, redirect->raddr, &addr4.sin_addr);
-            addr4.sin_port = htons(redirect->rport);
-        } else {
-            addr6.sin6_family = AF_INET6;
-            inet_pton(AF_INET6, redirect->raddr, &addr6.sin6_addr);
-            addr6.sin6_port = htons(redirect->rport);
-        }
-    }
-
-    // Initiate connect
-    int err = connect(sock,
-                      (const struct sockaddr *) (version == 4 ? &addr4 : &addr6),
-                      (socklen_t) (version == 4
-                                   ? sizeof(struct sockaddr_in)
-                                   : sizeof(struct sockaddr_in6)));
-    if (err < 0 && errno != EINPROGRESS) {
-        log_android(ANDROID_LOG_ERROR, "connect error %d: %s", errno, strerror(errno));
-        return -1;
-    }
-
-    return sock;
-}
 
 
 

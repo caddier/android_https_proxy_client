@@ -99,7 +99,7 @@ void handle_ip(const struct arguments *args,
     int flen = 0;
     uint8_t *payload;
 
-    log_android(ANDROID_LOG_DEBUG, "=======handle ip =======");
+    //log_android(ANDROID_LOG_DEBUG, "=======handle ip =======");
 
     // Get protocol, addresses & payload
     uint8_t version = (*pkt) >> 4;
@@ -142,7 +142,7 @@ void handle_ip(const struct arguments *args,
             log_android(ANDROID_LOG_WARN, "IP6 packet too short length %d", length);
             return;
         }
-        log_android(ANDROID_LOG_WARN, "IPV6 packet !!!!!");
+        //log_android(ANDROID_LOG_WARN, "IPV6 packet !!!!!");
 
         struct ip6_hdr *ip6hdr = (struct ip6_hdr *) pkt;
 
@@ -266,7 +266,7 @@ void handle_ip(const struct arguments *args,
 
 
     log_android(ANDROID_LOG_DEBUG,
-                "Packet v%d %s/%u > %s/%u proto %d flags %s uid %d",
+                "IP Packet v%d %s/%u > %s/%u proto %d flags %s uid %d",
                 version, source, sport, dest, dport, protocol, flags, uid);
 
     if (protocol == IPPROTO_ICMP || protocol == IPPROTO_ICMPV6) {

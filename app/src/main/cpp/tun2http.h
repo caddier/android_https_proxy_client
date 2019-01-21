@@ -505,10 +505,6 @@ void hex_free(char *hex);
 
 int32_t get_domain_from_ip(int32_t fake_ip, char *domain_buffer);
 
-int open_tls_tunnel(const struct arguments *args,
-                                        const struct tcp_session *cur,
-                                        const struct allowed *redirect,
-                                        char *remote_domain, uint16_t remote_port, int tcp_socket );
 
 int32_t isllegaldomain(char *domainname);
 

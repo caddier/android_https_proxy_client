@@ -230,8 +230,6 @@ void *handle_events(void *a) {
                         }
                         log_android(ANDROID_LOG_DEBUG, "====check_tun over=====");
                     }
-
-
                 } else {
 
                     // Check downstream,  tcp or udp tunnel is downstream
